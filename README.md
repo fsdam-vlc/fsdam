@@ -1,4 +1,4 @@
-# FSDAM: Few-Shot Driver Attention Modeling
+# FSDAM: Few-Shot Driver Attention Modeling visa Vision-Language Coupling
 
 ## 1. Setup
 
@@ -92,7 +92,7 @@ This builds loaders from `model/dataloader.py`, model from `model/architecture.p
 from eval.saliency_metrices import CC, KLDivergence, SIM
 ```
 
-Inputs must be tensors shaped `[B, 1, H, W]` with matching sizes. No blur.
+Inputs must be tensors shaped `[B, 1, H, W]` with matching sizes. 
 
 
 
