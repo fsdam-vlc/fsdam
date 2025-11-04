@@ -1,122 +1,93 @@
-# config.py 
+import json, random
 from pathlib import Path
+from typing import List, Dict
+import numpy as np
+from PIL import Image
 import torch
+from torch.utils.data import Dataset, DataLoader
+from config import CFG
 
-THIS_DIR  = Path(__file__).resolve().parent
-PROJ_ROOT = THIS_DIR
+def _load_json_list(path: Path) -> List[Dict]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise ValueError(f"Top-level JSON in {path} must be a list.")
+    return data
 
+def _assistant_caption(rec: Dict) -> str:
+    if isinstance(rec.get("answer"), str) and rec["answer"].strip():
+        return rec["answer"].strip()
+    conv = rec.get("conversations", [])
+    for t in conv:
+        if isinstance(t, dict) and t.get("from") == "gpt":
+            return (t.get("value") or "").strip()
+    raise ValueError("No caption found.")
 
-class CFG:
-    # ===== Experiment =====
-    EXP_NAME = "fsdam"
+class BDDADataset(Dataset):
+    def __init__(self, rgb_dir, gaze_dir, json_path, for_train=True):
+        self.rgb_dir = Path(rgb_dir)
+        self.gaze_dir = Path(gaze_dir)
+        self.items = _load_json_list(Path(json_path))
+        self.for_train = for_train
+        self.records = self._index()
+        if for_train:
+            random.shuffle(self.records)
+        print(f"[dataloader] JSON={Path(json_path).name} | N={len(self.records)}")
 
-    # ===== Data =====
-    TRAIN_RGB_DIR  = (PROJ_ROOT / "few_shot_dataset" / "caption_gaze" / "train" / "camera").resolve()
-    TRAIN_GAZE_DIR = (PROJ_ROOT / "few_shot_dataset" / "caption_gaze" / "train" / "gaze").resolve()
-    VAL_RGB_DIR    = (PROJ_ROOT / "few_shot_dataset" / "caption_gaze" / "val"   / "camera").resolve()
-    VAL_GAZE_DIR   = (PROJ_ROOT / "few_shot_dataset" / "caption_gaze" / "val"   / "gaze").resolve()
-    TRAIN_JSON     = (PROJ_ROOT / "few_shot_dataset" / "caption_gaze" / "bdda_train.json").resolve()
-    VAL_JSON       = (PROJ_ROOT / "few_shot_dataset" / "caption_gaze" / "bdda_val.json").resolve()
+    def _index(self):
+        out = []
+        for rec in self.items:
+            name = Path(rec.get("image", "")).name or (rec.get("id", "") + ".png")
+            if name:
+                out.append({
+                    "fname": name,
+                    "prompt": CFG.FIXED_Q,
+                    "answer": _assistant_caption(rec)
+                })
+        return out
 
-    # ===== Prompt =====
-    FIXED_Q = (
-        "Answer the following for the image: What is in the scene, where is the driver "
-        "looking now, and where will the gaze shift next and why?\n"
-        "Return exactly four sentences in this order: "
-        "WHAT (scene summary). WHERE-NOW (current driver gaze target). "
-        "WHERE-NEXT (next gaze target). WHY (reason for the shift).\n"
-        "Do not use lists or numbering."
-    )
+    def _load_pil(self, fname):
+        img = Image.open(self.rgb_dir / fname).convert("RGB")
+        return img
 
-    # ===== Geometry / dims =====
-    GAZE_OUT  = 64
-    GRID_TOK  = 24
-    D_COMMON  = 768
+    def _load_gaze(self, fname):
+        g = Image.open(self.gaze_dir / fname).convert("L").resize((CFG.GAZE_OUT, CFG.GAZE_OUT), Image.BILINEAR)
+        arr = np.asarray(g, dtype=np.float32)
+        if arr.max() > 1.0:
+            arr /= 255.0
+        s = float(arr.sum())
+        if s <= 1e-8:
+            arr[:] = 1.0 / (CFG.GAZE_OUT * CFG.GAZE_OUT)
+        else:
+            arr /= s
+        return torch.from_numpy(arr).unsqueeze(0)
 
-    # ===== Backbone =====
-    LLAVA_MODEL = "llava-hf/llava-v1.6-mistral-7b-hf"
+    def __len__(self): return len(self.records)
 
-    # ===== LoRA on LM =====
-    LORA_R        = 16
-    LORA_ALPHA    = 32
-    # LORA_DROPOUT  = 0.2
-    # LORA_TARGET   = ["q_proj", "k_proj", "v_proj", "o_proj"]
-    LORA_DROPOUT    = 0.2
-    LORA_TARGET     = ["q_proj", "k_proj", "v_proj", "o_proj"]
-    # ===== GCLA and caption prefix =====
-    GCLA_HEADS      = 16
-    M_GTOK          = 16
-    M_GTOK_GAZE     = 16
-    PREFIX_TOKENS   = 8
+    def __getitem__(self, i):
+        r = self.records[i]
+        return {
+            "fname": r["fname"],
+            "image": self._load_pil(r["fname"]),
+            "gaze": self._load_gaze(r["fname"]),
+            "prompt": r["prompt"],
+            "answer": r["answer"]
+        }
 
-    # ===== Gaze Head =====
-    GAZE_TAU = 1.2
+def collate_fn(batch):
+    return {
+        "fname": [b["fname"] for b in batch],
+        "images": [b["image"] for b in batch],
+        "gaze": torch.stack([b["gaze"] for b in batch]),
+        "prompts": [b["prompt"] for b in batch],
+        "answers": [b["answer"] for b in batch],
+    }
 
-    # ===== Blur gap gaze loss =====
-    BG_SIGMA  = 1.0
-    BG_LAMBDA = 0.3
-    BG_MARGIN = 0.05
-
-    # ===== Loss weights =====
-    WEIGHTS = dict(
-        gaze = 1.0,
-        align= 0.2,
-        cap  = 1.0,
-        align_start = 0.0,
-    )
-    ALIGN_TAU  = 0.07
-    RAMP_EPOCH = 0
-
-    # ===== Training =====
-    BATCH_SIZE   = 4
-    NUM_WORKERS  = 4
-    EPOCHS       = 12
-    MIXED_PREC   = "bf16"
-    GRAD_ACCUM   = 4
-    LR_LORA      = 1e-4
-    LR_HEADS     = 2e-4
-    GRAD_CLIP    = 1.0
-
-    # ===== Inference and eval =====
-    EVAL_BEAMS            = 3
-    EVAL_MAX_NEW_TOKENS   = 128
-    REPETITION_PENALTY    = 0.0
-    LENGTH_PENALTY        = 0.0
-
-    # ===== Runtime =====
-    DEVICE       = "cuda" if torch.cuda.is_available() else "cpu"
-    SEED         = 42
-
-    # ===== Checkpoints =====
-    CKPT_DIR = (PROJ_ROOT / "checkpoints" / EXP_NAME).resolve()
-    CKPT_DIR.mkdir(parents=True, exist_ok=True)
-
-    # ===== Ablation toggles =====
-    # GCLA: off, shared, dual
-    GCLA_MODE        = "dual"
-    GCLA_DROPOUT     = 0.0
-    GCLA_PRENORM     = False
-    GCLA_RESIDUAL    = False
-    GCLA_POSENC      = "none"     # none, sine2d
-    GCLA_KV_CONV1x1  = False
-    # Heads and queries are above: GCLA_HEADS, M_GTOK, M_GTOK_GAZE
-
-    # Branch toggles
-    CAPTION_ON       = True
-    ALIGN_ON         = True
-    GAZE_BLUR_GAP_ON = True
-    PREFIX_ON        = True
-    LORA_ON          = True
-    GAZE_TAU_LEARN   = False    # learnable temperature in gaze head
-
-
-def sanity_check():
-    paths = [
-        CFG.TRAIN_RGB_DIR, CFG.TRAIN_GAZE_DIR,
-        CFG.VAL_RGB_DIR,   CFG.VAL_GAZE_DIR,
-        CFG.TRAIN_JSON,    CFG.VAL_JSON,
-        CFG.CKPT_DIR,
-    ]
-    missing = [str(p) for p in paths if not p.exists()]
-    if missing:
-        raise FileNotFoundError("Missing paths:\n" + "\n".join(" - " + m for m in missing))
+def make_loaders():
+    tr_ds = BDDADataset(CFG.TRAIN_RGB_DIR, CFG.TRAIN_GAZE_DIR, CFG.TRAIN_JSON, True)
+    va_ds = BDDADataset(CFG.VAL_RGB_DIR, CFG.VAL_GAZE_DIR, CFG.VAL_JSON, False)
+    tr = DataLoader(tr_ds, batch_size=CFG.BATCH_SIZE, shuffle=True,
+                    num_workers=CFG.NUM_WORKERS, collate_fn=collate_fn, pin_memory=True)
+    va = DataLoader(va_ds, batch_size=CFG.BATCH_SIZE, shuffle=False,
+                    num_workers=CFG.NUM_WORKERS, collate_fn=collate_fn, pin_memory=True)
+    print(f"[dataloader] Train={len(tr_ds)} | Val={len(va_ds)}")
+    return tr, va
