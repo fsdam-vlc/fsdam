@@ -17,18 +17,13 @@ pip install -r model/requirements.txt
 ## 2. Repository layout
 
 ```
-benchmarking_results/
-  bdda_test.json
-  dada_2000_test.json
-  dreyeve_test.json
-
 eval/
   bleu.py
   meteor.py
   rouge.py
   cider.py
   ciderR.py
-  saliency_metrices.py   # adopted from LLada
+  saliency_metrices.py   
 
 model/
   dataset/
