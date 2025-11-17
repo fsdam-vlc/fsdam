@@ -99,6 +99,5 @@ Inputs must be tensors shaped `[B, 1, H, W]` with matching sizes.
 
 ## 7. License and citation
 
-Please cite FSDAM if you use this code. Also cite datasets and LLada metrics where used.
-
+Please cite FSDAM if you use this code. 
 
