@@ -2,7 +2,7 @@
 ## Demo Video
 
 <p align="center">
-  <img src="assets/demo.gif" width="720">
+  <img src="assets/demo.gif" width="1080">
 </p>
 
 
