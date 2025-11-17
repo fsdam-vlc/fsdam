@@ -1,4 +1,9 @@
 # FSDAM: Few-Shot Driver Attention Modeling visa Vision-Language Coupling
+## Demo Video
+<video width="720" controls>
+  <source src="assets/prediction_vid_01.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
 
 ## 1. Setup
 
