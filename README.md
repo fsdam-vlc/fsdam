@@ -2,7 +2,7 @@
 ## Demo Video
 
 <video width="720" controls>
-  <source src="fsdam/assets/prediction_vid_01.mp4" type="video/mp4">
+  <source src="assets/prediction_vid_01.mp4" type="video/mp4">
 </video>
 
 
