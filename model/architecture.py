@@ -175,7 +175,7 @@ class LlavaBackbone(nn.Module):
         for p in self.model.parameters():
             p.requires_grad_(False)
 
-        # Optional LoRA on LM
+        # LoRA on LM
         if CFG.LORA_ON:
             lm = self.model.language_model if hasattr(self.model, "language_model") else self.model.model.language_model
             lcfg = LoraConfig(
